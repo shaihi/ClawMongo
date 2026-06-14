@@ -58,6 +58,10 @@ vi.mock("./session.js", async () => {
     formatError,
     getStatusCode,
     WA_WEB_AUTH_DIR: authDir,
+    readWebAuthExistsForDecision: vi.fn(async () => ({
+      outcome: "stable" as const,
+      exists: true,
+    })),
     logoutWeb: vi.fn(async (params: { authDir?: string }) => {
       await fs.rm(params.authDir ?? authDir, {
         recursive: true,
