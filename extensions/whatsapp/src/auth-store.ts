@@ -70,29 +70,33 @@ async function waitForWebAuthBarrier(
   return result;
 }
 
+function isValidJson(raw: string): boolean {
+  try {
+    JSON.parse(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function restoreCredsFromBackupIfNeeded(authDir: string): Promise<boolean> {
   const logger = getChildLogger({ module: "web-session" });
   try {
     const credsPath = resolveWebCredsPath(authDir);
     const backupPath = resolveWebCredsBackupPath(authDir);
     const raw = readCredsJsonRaw(credsPath);
-    if (raw) {
-      // Validate that creds.json is parseable.
-      JSON.parse(raw);
+    if (raw && isValidJson(raw)) {
       return false;
     }
 
     const backupRaw = readCredsJsonRaw(backupPath);
-    if (!backupRaw) {
+    if (!backupRaw || !isValidJson(backupRaw)) {
       return false;
     }
     const backupStats = await fs.lstat(backupPath).catch(() => null);
     if (!backupStats?.isFile()) {
       return false;
     }
-
-    // Ensure backup is parseable before restoring.
-    JSON.parse(backupRaw);
     await replaceFileAtomic({
       filePath: credsPath,
       content: backupRaw,

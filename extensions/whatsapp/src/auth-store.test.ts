@@ -7,6 +7,7 @@ import {
   pickWebChannel,
   readWebAuthSnapshot,
   readWebAuthState,
+  readWebSelfId,
   restoreCredsFromBackupIfNeeded,
   webAuthExists,
   WhatsAppAuthUnstableError,
@@ -70,10 +71,10 @@ describe("auth-store", () => {
     expect(fsSync.existsSync(credsPath)).toBe(false);
   });
 
-  it("restores creds from a regular backup file", async () => {
+  it("restores malformed creds from a valid backup", async () => {
     const authDir = createTempAuthDir("openclaw-wa-auth-restore");
     const credsPath = path.join(authDir, "creds.json");
-    fsSync.writeFileSync(credsPath, "{", "utf-8");
+    fsSync.writeFileSync(credsPath, "{x", "utf-8");
     fsSync.writeFileSync(
       path.join(authDir, "creds.json.bak"),
       JSON.stringify({ me: { id: "123@s.whatsapp.net" } }),
@@ -83,6 +84,39 @@ describe("auth-store", () => {
     await expect(restoreCredsFromBackupIfNeeded(authDir)).resolves.toBe(true);
     expect(JSON.parse(fsSync.readFileSync(credsPath, "utf-8"))).toEqual({
       me: { id: "123@s.whatsapp.net" },
+    });
+  });
+
+  it("leaves malformed creds unchanged when the backup is malformed", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-auth-malformed-backup");
+    const credsPath = path.join(authDir, "creds.json");
+    fsSync.writeFileSync(credsPath, "{x", "utf-8");
+    fsSync.writeFileSync(path.join(authDir, "creds.json.bak"), "{y", "utf-8");
+
+    await expect(restoreCredsFromBackupIfNeeded(authDir)).resolves.toBe(false);
+    expect(fsSync.readFileSync(credsPath, "utf-8")).toBe("{x");
+  });
+
+  it("preserves valid large creds instead of treating them as corrupt", async () => {
+    const authDir = createTempAuthDir("openclaw-wa-auth-large-creds");
+    const credsPath = path.join(authDir, "creds.json");
+    const largeCreds = JSON.stringify({
+      me: { id: "15551234567@s.whatsapp.net" },
+      additionalData: "x".repeat(1024 * 1024 + 512),
+    });
+    fsSync.writeFileSync(credsPath, largeCreds, "utf-8");
+    fsSync.writeFileSync(
+      path.join(authDir, "creds.json.bak"),
+      JSON.stringify({ me: { id: "19990000000@s.whatsapp.net" } }),
+      "utf-8",
+    );
+
+    await expect(webAuthExists(authDir)).resolves.toBe(true);
+    await expect(restoreCredsFromBackupIfNeeded(authDir)).resolves.toBe(false);
+    expect(fsSync.readFileSync(credsPath, "utf-8")).toBe(largeCreds);
+    expect(readWebSelfId(authDir)).toMatchObject({
+      e164: "+15551234567",
+      jid: "15551234567@s.whatsapp.net",
     });
   });
 
