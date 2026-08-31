@@ -233,6 +233,31 @@ describe("vectorSearch", () => {
     expect(projectStage.score).toEqual({ $meta: "vectorSearchScore" });
     expect(projectStage._id).toBe(0);
   });
+
+  // --- Timeout (P1a) ---
+
+  it("resolves to an empty array within the timeout window when the aggregate call hangs forever", async () => {
+    const hangingCollection = {
+      aggregate: vi.fn(() => ({
+        // Simulates an unbounded connection-level stall: never resolves, never rejects.
+        toArray: vi.fn(() => new Promise<Document[]>(() => {})),
+      })),
+    } as unknown as Collection;
+
+    const start = Date.now();
+    const results = await vectorSearch(hangingCollection, null, {
+      maxResults: 5,
+      minScore: 0,
+      indexName: "idx",
+      queryText: "query",
+      embeddingMode: "automated",
+    });
+    const elapsed = Date.now() - start;
+
+    expect(results).toEqual([]);
+    // Must be bounded well under the old real-world 11-minute stall.
+    expect(elapsed).toBeLessThan(15_000);
+  }, 20_000);
 });
 
 // ---------------------------------------------------------------------------

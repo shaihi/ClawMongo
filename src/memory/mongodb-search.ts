@@ -15,6 +15,50 @@ import type {
 
 const log = createSubsystemLogger("memory:mongodb:search");
 
+// Bounds how long any single Atlas Search aggregate call (vector, keyword, or
+// hybrid fusion) may run. Longer than the reranker's timeout (5s) since search
+// is upstream of reranking in the retrieval pipeline. `maxTimeMS` caps the
+// server-side op; the client-side race below also catches connection-level
+// stalls where the server-side op never even starts (the failure mode that
+// caused an 11-minute silent turn stall with no timeout in place).
+const SEARCH_TIMEOUT_MS = Number(process.env.MONGODB_SEARCH_TIMEOUT_MS) || 8_000;
+
+/**
+ * Runs an Atlas Search aggregate pipeline with a bounded timeout on both the
+ * server side (`maxTimeMS`) and the client side (a race against a timer).
+ * On timeout or any aggregate error, logs a warning naming the search method
+ * and elapsed time, then resolves to an empty array instead of throwing —
+ * callers must never let a single search path's failure kill the whole turn.
+ */
+async function runAggregateWithTimeout(
+  collection: Collection,
+  pipeline: Document[],
+  method: SearchTraceEvent["method"],
+): Promise<Document[]> {
+  const start = Date.now();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      collection.aggregate(pipeline, { maxTimeMS: SEARCH_TIMEOUT_MS }).toArray(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${method} search timed out after ${SEARCH_TIMEOUT_MS}ms`));
+        }, SEARCH_TIMEOUT_MS);
+      }),
+    ]);
+    return result;
+  } catch (err) {
+    const elapsed = Date.now() - start;
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn(`${method} search aggregate failed or timed out after ${elapsed}ms: ${message}`);
+    return [];
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 export type SearchExplainTraceArtifact = {
   artifactType: "searchExplain" | "vectorExplain" | "fusionExplain" | "scoreDetails" | "trace";
   summary: Record<string, unknown>;
@@ -342,7 +386,7 @@ export async function vectorSearch(
     }
   }
 
-  const docs = await collection.aggregate(pipeline).toArray();
+  const docs = await runAggregateWithTimeout(collection, pipeline, "vector");
   const results = docs.map((doc) => toSearchResult(doc, "memory"));
   return filterByScore(results, opts.minScore);
 }
@@ -411,7 +455,7 @@ export async function keywordSearch(
     }
   }
 
-  const docs = await collection.aggregate(pipeline).toArray();
+  const docs = await runAggregateWithTimeout(collection, pipeline, "keyword");
   if (opts.explain?.enabled && opts.explain.includeScoreDetails) {
     const scoreDetailSample = docs.find((doc) => doc.scoreDetails != null)?.scoreDetails;
     if (scoreDetailSample) {
@@ -530,7 +574,7 @@ export async function hybridSearchScoreFusion(
     }
   }
 
-  const docs = await collection.aggregate(pipeline).toArray();
+  const docs = await runAggregateWithTimeout(collection, pipeline, "scoreFusion");
   const results = docs.map((doc) => toSearchResult(doc, "memory"));
   return filterByScore(results, opts.minScore);
 }
@@ -637,7 +681,7 @@ export async function hybridSearchRankFusion(
     }
   }
 
-  const docs = await collection.aggregate(pipeline).toArray();
+  const docs = await runAggregateWithTimeout(collection, pipeline, "rankFusion");
   const results = docs.map((doc) => toSearchResult(doc, "memory"));
   return filterByScore(results, opts.minScore);
 }
