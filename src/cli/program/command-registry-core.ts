@@ -82,6 +82,11 @@ const coreEntrySpecs: readonly CommandGroupDescriptorSpec<
         exportName: "registerBackupCommand",
       },
       {
+        commandNames: ["kb"],
+        loadModule: () => import("../kb-cli.js"),
+        exportName: "registerKBCli",
+      },
+      {
         commandNames: ["migrate"],
         loadModule: () => import("./register.migrate.js"),
         exportName: "registerMigrateCommand",

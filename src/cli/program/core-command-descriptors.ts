@@ -36,6 +36,11 @@ const coreCliCommandCatalog = defineCommandDescriptorCatalog([
     hasSubcommands: true,
   },
   {
+    name: "kb",
+    description: "Knowledge base management (MongoDB)",
+    hasSubcommands: true,
+  },
+  {
     name: "migrate",
     description: "Import state from another agent system",
     hasSubcommands: true,
