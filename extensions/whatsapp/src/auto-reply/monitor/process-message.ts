@@ -32,10 +32,7 @@ import { whatsappInboundLog } from "../loggers.js";
 import type { WebInboundMsg } from "../types.js";
 import { elide } from "../util.js";
 import { maybeSendAckReaction } from "./ack-reaction.js";
-import {
-  createTourbotCliBridge,
-  maybeHandleGuideInterviewMessage,
-} from "./guide-interview.js";
+import { createTourbotCliBridge, maybeHandleGuideInterviewMessage } from "./guide-interview.js";
 import { buildGuideDeferralText, isGuidePresentInGroup } from "./guide-presence.js";
 import {
   resolveVisibleWhatsAppGroupHistory,
@@ -223,6 +220,24 @@ export async function processMessage(params: {
   });
   const account = inboundPolicy.account;
 
+  // Both guide-turn short-circuits below return before the normal ack-reaction
+  // call further down this function ever runs — that call only fires for
+  // turns that reach the full agent pipeline. Without this, the guide
+  // interview and every guide-present group turn silently never got the
+  // 👀 ack reaction, even though the message was genuinely handled.
+  const sendEarlyAckReaction = () =>
+    maybeSendAckReaction({
+      cfg: params.cfg,
+      msg: params.msg,
+      agentId: params.route.agentId,
+      sessionKey: params.route.sessionKey,
+      conversationId,
+      verbose: params.verbose,
+      accountId: account.accountId,
+      info: params.replyLogger.info.bind(params.replyLogger),
+      warn: params.replyLogger.warn.bind(params.replyLogger),
+    });
+
   // Private DM fact-learning ("grill me" mode): when the human guide messages
   // the bot 1:1, this fully owns the turn (asks questions, persists answers
   // via the tourbot CLI bridge) and the normal agent pipeline never runs.
@@ -233,6 +248,7 @@ export async function processMessage(params: {
       cliBridge: tourbotCliBridge,
     });
     if (handledByInterview) {
+      if (!params.ackReaction && params.ackAlreadySent !== true) await sendEarlyAckReaction();
       return true;
     }
   }
@@ -248,6 +264,7 @@ export async function processMessage(params: {
       authDir: account.authDir,
     });
     if (guidePresent) {
+      if (!params.ackReaction && params.ackAlreadySent !== true) await sendEarlyAckReaction();
       await params.msg.reply(buildGuideDeferralText());
       return true;
     }
