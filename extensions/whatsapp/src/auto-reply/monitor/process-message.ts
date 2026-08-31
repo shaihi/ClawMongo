@@ -33,6 +33,11 @@ import type { WebInboundMsg } from "../types.js";
 import { elide } from "../util.js";
 import { maybeSendAckReaction } from "./ack-reaction.js";
 import {
+  createTourbotCliBridge,
+  maybeHandleGuideInterviewMessage,
+} from "./guide-interview.js";
+import { buildGuideDeferralText, isGuidePresentInGroup } from "./guide-presence.js";
+import {
   resolveVisibleWhatsAppGroupHistory,
   resolveVisibleWhatsAppReplyContext,
   type GroupHistoryEntry,
@@ -69,6 +74,10 @@ const WHATSAPP_MESSAGE_RECEIVED_HOOK_LIMITS = {
   maxQueue: 128,
   timeoutMs: 2_000,
 };
+
+// Bridge to the server/ tourbot CLI, reused across turns. Building it is
+// cheap (no IO happens until keep()/topicsKnown() is called).
+const tourbotCliBridge = createTourbotCliBridge();
 
 type WhatsAppMessageReceivedHookConfig = {
   pluginHooks?: {
@@ -213,6 +222,37 @@ export async function processMessage(params: {
     selfE164: self.e164 ?? null,
   });
   const account = inboundPolicy.account;
+
+  // Private DM fact-learning ("grill me" mode): when the human guide messages
+  // the bot 1:1, this fully owns the turn (asks questions, persists answers
+  // via the tourbot CLI bridge) and the normal agent pipeline never runs.
+  // See guide-interview.ts.
+  if (params.msg.chatType !== "group") {
+    const handledByInterview = await maybeHandleGuideInterviewMessage({
+      msg: params.msg,
+      cliBridge: tourbotCliBridge,
+    });
+    if (handledByInterview) {
+      return true;
+    }
+  }
+
+  // Group defer-to-guide: when the human guide is present in this group, the
+  // bot should not try to answer client questions autonomously here — defer
+  // to the guide with an @-mention instead of generating its own answer.
+  // See guide-presence.ts.
+  if (params.msg.chatType === "group") {
+    const guidePresent = isGuidePresentInGroup({
+      groupParticipants: params.msg.groupParticipants,
+      roster: params.groupMemberNames.get(params.groupHistoryKey),
+      authDir: account.authDir,
+    });
+    if (guidePresent) {
+      await params.msg.reply(buildGuideDeferralText());
+      return true;
+    }
+  }
+
   const contextVisibilityMode = resolveChannelContextVisibilityMode({
     cfg: params.cfg,
     channel: "whatsapp",
