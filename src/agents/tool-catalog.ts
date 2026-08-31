@@ -401,6 +401,11 @@ export const PROFILE_OPTIONS = [
   { id: "full", label: "Full" },
 ] as const;
 
+/** Total number of known core tools, independent of any profile filtering. */
+export function countCoreTools(): number {
+  return CORE_TOOL_DEFINITIONS.length;
+}
+
 export function resolveCoreToolProfilePolicy(profile?: string): ToolProfilePolicy | undefined {
   if (!profile) {
     return undefined;

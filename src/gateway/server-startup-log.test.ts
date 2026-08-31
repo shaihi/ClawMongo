@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { stripAnsi } from "../terminal/ansi.js";
-import { formatAgentModelStartupDetails, logGatewayStartup } from "./server-startup-log.js";
+import {
+  formatAgentModelStartupDetails,
+  formatToolProfileStartupMessage,
+  logGatewayStartup,
+} from "./server-startup-log.js";
 
 describe("gateway startup log", () => {
   afterEach(() => {
@@ -165,5 +169,45 @@ describe("gateway startup log", () => {
     expect(listeningMessages).toEqual([
       "http server listening (3 plugins: alpha, beta, delta; 16.0s)",
     ]);
+  });
+
+  describe("formatToolProfileStartupMessage", () => {
+    it("reports the configured profile and its source when tools.profile is set", () => {
+      const message = formatToolProfileStartupMessage({
+        tools: { profile: "minimal" },
+      } as never);
+
+      expect(message).toContain('resolved="minimal"');
+      expect(message).toContain("source=config value");
+      expect(message).toMatch(/\d+ tools enabled/);
+    });
+
+    it("reports the default profile and its source when tools.profile is unset", () => {
+      const message = formatToolProfileStartupMessage({} as never);
+
+      expect(message).toContain('resolved="full"');
+      expect(message).toContain("source=default");
+      expect(message).toMatch(/\d+ tools enabled/);
+    });
+  });
+
+  it("logs the resolved tools.profile on startup", () => {
+    const info = vi.fn();
+    const warn = vi.fn();
+
+    logGatewayStartup({
+      cfg: { tools: { profile: "minimal" } } as never,
+      bindHost: "127.0.0.1",
+      loadedPluginIds: [],
+      port: 18789,
+      log: { info, warn },
+      isNixMode: false,
+    });
+
+    const profileMessages = info.mock.calls
+      .map((call) => call[0])
+      .filter((message: string) => message.startsWith("tools.profile:"));
+    expect(profileMessages).toEqual([expect.stringContaining('resolved="minimal"')]);
+    expect(profileMessages[0]).toContain("source=config value");
   });
 });

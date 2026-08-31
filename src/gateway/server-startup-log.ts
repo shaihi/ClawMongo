@@ -8,6 +8,7 @@ import {
   legacyModelKey,
   modelKey,
 } from "../agents/model-selection.js";
+import { countCoreTools, resolveCoreToolProfilePolicy } from "../agents/tool-catalog.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getResolvedLoggerSettings } from "../logging.js";
 import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
@@ -55,6 +56,7 @@ export function logGatewayStartup(params: {
     `http server listening (${formatReadyDetails(params.loadedPluginIds, startupDurationLabel)})`,
   );
   params.log.info(`log file: ${getResolvedLoggerSettings().file}`);
+  params.log.info(formatToolProfileStartupMessage(params.cfg));
   if (params.isNixMode) {
     params.log.info("gateway: running in Nix mode (config managed externally)");
   }
@@ -127,6 +129,23 @@ export function formatAgentModelStartupDetails(params: {
   });
 
   return `thinking=${thinking}, fast=${fast.enabled ? "on" : "off"}`;
+}
+
+/**
+ * Confirms, in boot logs, whether a top-level `tools.profile` config change
+ * (e.g. `{ "tools": { "profile": "minimal" } }` in openclaw.json) actually
+ * took effect on this run — there was previously no way to tell from startup
+ * logs whether the resolved profile matched the configured value.
+ */
+export function formatToolProfileStartupMessage(cfg: OpenClawConfig): string {
+  const configuredProfile = cfg.tools?.profile;
+  const source = configuredProfile ? "config value" : "default";
+  const resolvedProfile = configuredProfile ?? "full";
+  const policy = resolveCoreToolProfilePolicy(resolvedProfile);
+  const enabledToolCount = policy?.allow
+    ? policy.allow.length
+    : countCoreTools() - (policy?.deny?.length ?? 0);
+  return `tools.profile: resolved="${resolvedProfile}" (source=${source}), ${enabledToolCount} tools enabled`;
 }
 
 function formatReadyDetails(
