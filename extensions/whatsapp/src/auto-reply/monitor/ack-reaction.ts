@@ -76,7 +76,14 @@ export async function maybeSendAckReaction(params: {
   const reactionOptions = {
     verbose: params.verbose,
     fromMe: false,
-    ...(sender.jid ? { participant: sender.jid } : {}),
+    // Group senders increasingly arrive as a privacy @lid rather than a
+    // phone-number JID; resolveComparableIdentity() nulls sender.jid in
+    // that case (it's built for allowlist comparison, not for handing
+    // back to WhatsApp). Reactions need *a* valid identifier for the
+    // group message key's `participant`, in whichever form it arrived —
+    // without it Baileys silently drops the reaction in groups (DMs never
+    // need participant, which is why this only broke in groups).
+    ...((sender.lid ?? sender.jid) ? { participant: sender.lid ?? sender.jid ?? undefined } : {}),
     ...(params.accountId ? { accountId: params.accountId } : {}),
     cfg: params.cfg,
   };
