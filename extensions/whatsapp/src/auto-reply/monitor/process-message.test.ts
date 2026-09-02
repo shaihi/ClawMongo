@@ -50,13 +50,25 @@ vi.mock("openclaw/plugin-sdk/plugin-runtime", () => ({
   }),
 }));
 
+// Mutable so an individual test can speak as a different person. It has to go
+// through vi.hoisted: vi.mock factories are hoisted above ordinary module
+// scope, so a plain `let` would still be in the temporal dead zone when the
+// factory runs. Note also that vi.mock is hoisted to the FILE level even when
+// written inside an `it()` body — a per-test vi.mock silently replaces this
+// one for every test in the file, which is how `identitiesOverlap` went
+// missing and took nine unrelated tests down with it.
+const identityState = vi.hoisted(() => ({
+  sender: { name: "Alice", e164: "+15550002222" } as { name: string; e164: string },
+}));
+const DEFAULT_SENDER_IDENTITY = { name: "Alice", e164: "+15550002222" };
+
 vi.mock("../../identity.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../identity.js")>();
   return {
     ...actual,
     getPrimaryIdentityId: () => null,
     getSelfIdentity: () => ({ e164: "+15550001111" }),
-    getSenderIdentity: () => ({ name: "Alice", e164: "+15550002222" }),
+    getSenderIdentity: () => identityState.sender,
   };
 });
 
@@ -193,10 +205,10 @@ const baseRoute = {
   matchedBy: "default",
 };
 
-function callProcessMessage(overrides: { cfg?: unknown } = {}) {
+function callProcessMessage(overrides: { cfg?: unknown; msg?: unknown } = {}) {
   return processMessage({
     cfg: (overrides.cfg ?? {}) as never,
-    msg: baseMsg as never,
+    msg: (overrides.msg ?? baseMsg) as never,
     route: baseRoute as never,
     groupHistoryKey: "whatsapp:default:group:123@g.us",
     groupHistories: new Map(),

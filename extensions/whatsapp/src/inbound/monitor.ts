@@ -10,10 +10,16 @@ import { recordChannelActivity } from "openclaw/plugin-sdk/channel-activity-runt
 import { formatLocationText } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import { getChildLogger } from "openclaw/plugin-sdk/logging-core";
+import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { defaultRuntime } from "openclaw/plugin-sdk/runtime-env";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { readWebSelfIdentityForDecision, WhatsAppAuthUnstableError } from "../auth-store.js";
-import { getPrimaryIdentityId, resolveComparableIdentity } from "../identity.js";
+import {
+  getPrimaryIdentityId,
+  identitiesOverlap,
+  resolveComparableIdentity,
+  type WhatsAppSelfIdentity,
+} from "../identity.js";
 import { cacheInboundMessageMeta } from "../quoted-message.js";
 import { DEFAULT_RECONNECT_POLICY, computeBackoff, sleepWithAbort } from "../reconnect.js";
 import type { OpenClawConfig } from "../runtime-api.js";
@@ -113,6 +119,47 @@ function isGroupJid(jid: string): boolean {
   return (typeof isJidGroup === "function" ? isJidGroup(jid) : jid.endsWith("@g.us")) === true;
 }
 
+/** Baileys' `group-participants.update` payload, narrowed to the fields we
+ * need. `participants` is typed loosely (string or `{ id }`) so the pure
+ * helper below stays usable from tests without pulling in the full Baileys
+ * `GroupParticipant`/`Contact` shape. */
+export type GroupParticipantsUpdateEvent = {
+  id?: string;
+  action?: string;
+  participants?: Array<{ id?: string | null } | string | null>;
+};
+
+/**
+ * TourBot §7 fix: the group welcome should fire the moment the bot is ADDED
+ * to a group, not wait for the group's first message. Pure so it can be
+ * tested without a live socket.
+ *
+ * Returns the group id to welcome when — and only when — `action` is "add"
+ * AND the bot's OWN identity is among the added participants, checked with
+ * the @lid-safe `identitiesOverlap` (never a raw JID string compare, which
+ * silently fails for privacy `@lid` JIDs — the exact bug class this exists
+ * to avoid). Returns null for every other case, including "remove",
+ * "promote", "demote", and adds of OTHER participants to a group the bot is
+ * already in.
+ */
+export function groupIdIfBotAdded(
+  update: GroupParticipantsUpdateEvent,
+  self: WhatsAppSelfIdentity,
+  authDir?: string,
+): string | null {
+  if (update.action !== "add" || !update.id) {
+    return null;
+  }
+  const botWasAdded = (update.participants ?? []).some((participant) => {
+    const jid = typeof participant === "string" ? participant : participant?.id;
+    if (!jid) {
+      return false;
+    }
+    return identitiesOverlap(self, resolveComparableIdentity({ jid }, authDir));
+  });
+  return botWasAdded ? update.id : null;
+}
+
 function recordAcceptedInboundActivity(accountId: string): void {
   recordChannelActivity({
     channel: "whatsapp",
@@ -165,6 +212,15 @@ type MonitorWebInboxOptions = {
   disconnectRetryAbortSignal?: AbortSignal;
   /** Shared group metadata cache used only for inbound metadata fallback after fetch failures. */
   groupMetadataCache?: WhatsAppGroupMetadataCache;
+  /**
+   * TourBot §7 fix: the group welcome should fire the moment the bot is
+   * ADDED to a group, not wait for the first message in it. Fired only for
+   * `action: "add"` events where the bot's own identity (via the @lid-safe
+   * `identitiesOverlap`, never a raw JID compare) is among the added
+   * participants. Never throws from here — errors are caught and logged;
+   * see the caller (auto-reply/monitor.ts) for what it does with this hook.
+   */
+  onGroupParticipantsUpdate?: (input: { groupId: string }) => Promise<void>;
 };
 
 export async function attachWebInboxToSocket(
@@ -859,6 +915,39 @@ export async function attachWebInboxToSocket(
       resolveClose({ status: undefined, isLoggedOut: false, error: err });
     }
   };
+  const handleGroupParticipantsUpdate = (update: GroupParticipantsUpdateEvent) => {
+    try {
+      const groupId = groupIdIfBotAdded(update, self, options.authDir);
+      if (!groupId) {
+        return;
+      }
+      void options.onGroupParticipantsUpdate?.({ groupId }).catch((err) => {
+        inboundLogger.warn(
+          { error: String(err), groupId },
+          "group-participants.update: bot-added welcome hook failed",
+        );
+      });
+      const hookRunner = getGlobalHookRunner();
+      if (hookRunner?.hasHooks("whatsapp_group_participants_update")) {
+        const addedParticipants = (update.participants ?? [])
+          .map((participant) => (typeof participant === "string" ? participant : participant?.id))
+          .filter((jid): jid is string => Boolean(jid));
+        void hookRunner
+          .runWhatsAppGroupParticipantsUpdate(
+            { groupId, addedParticipants, channelId: "whatsapp" },
+            { channelId: "whatsapp" },
+          )
+          .catch((err) => {
+            inboundLogger.warn(
+              { error: String(err), groupId },
+              "group-participants.update: whatsapp_group_participants_update plugin hook failed",
+            );
+          });
+      }
+    } catch (err) {
+      inboundLogger.error({ error: String(err) }, "group-participants.update handler error");
+    }
+  };
   const detachMessagesUpsert = attachEmitterListener(
     sock.ev as unknown as {
       on: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -876,6 +965,15 @@ export async function attachWebInboxToSocket(
     },
     "connection.update",
     handleConnectionUpdate as unknown as (...args: unknown[]) => void,
+  );
+  const detachGroupParticipantsUpdate = attachEmitterListener(
+    sock.ev as unknown as {
+      on: (event: string, listener: (...args: unknown[]) => void) => void;
+      off?: (event: string, listener: (...args: unknown[]) => void) => void;
+      removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+    },
+    "group-participants.update",
+    handleGroupParticipantsUpdate as unknown as (...args: unknown[]) => void,
   );
 
   void (async () => {
@@ -930,6 +1028,7 @@ export async function attachWebInboxToSocket(
       try {
         detachMessagesUpsert();
         detachConnectionUpdate();
+        detachGroupParticipantsUpdate();
         closeInboundMonitorSocket(sock);
       } catch (err) {
         logWhatsAppVerbose(options.verbose, `Socket close failed: ${String(err)}`);

@@ -101,7 +101,8 @@ export type PluginHookName =
   | "before_dispatch"
   | "reply_dispatch"
   | "before_install"
-  | "before_agent_run";
+  | "before_agent_run"
+  | "whatsapp_group_participants_update";
 
 export const PLUGIN_HOOK_NAMES = [
   "before_model_resolve",
@@ -140,6 +141,7 @@ export const PLUGIN_HOOK_NAMES = [
   "reply_dispatch",
   "before_install",
   "before_agent_run",
+  "whatsapp_group_participants_update",
 ] as const satisfies readonly PluginHookName[];
 
 type MissingPluginHookNames = Exclude<PluginHookName, (typeof PLUGIN_HOOK_NAMES)[number]>;
@@ -844,6 +846,12 @@ export type PluginHookBeforeAgentRunEvent = {
 /** Result type for before_agent_run. Returns pass/block or void (= pass). */
 export type PluginHookBeforeAgentRunResult = InputGateDecision | void;
 
+export type PluginHookWhatsAppGroupParticipantsUpdateEvent = {
+  groupId: string;
+  addedParticipants?: string[];
+  channelId: "whatsapp";
+};
+
 export type PluginHookHandlerMap = {
   agent_turn_prepare: (
     event: PluginAgentTurnPrepareEvent,
@@ -996,6 +1004,10 @@ export type PluginHookHandlerMap = {
     event: PluginHookBeforeAgentRunEvent,
     ctx: PluginHookAgentContext,
   ) => Promise<PluginHookBeforeAgentRunResult> | PluginHookBeforeAgentRunResult;
+  whatsapp_group_participants_update: (
+    event: PluginHookWhatsAppGroupParticipantsUpdateEvent,
+    ctx: PluginHookAgentContext,
+  ) => Promise<void> | void;
 };
 
 export type PluginHookRegistration<K extends PluginHookName = PluginHookName> = {

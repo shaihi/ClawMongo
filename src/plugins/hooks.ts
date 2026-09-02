@@ -84,6 +84,7 @@ import type {
   PluginHookBeforeInstallContext,
   PluginHookBeforeInstallEvent,
   PluginHookBeforeInstallResult,
+  PluginHookWhatsAppGroupParticipantsUpdateEvent,
 } from "./hook-types.js";
 
 // Re-export types for consumers
@@ -151,6 +152,7 @@ export type {
   PluginHookBeforeInstallContext,
   PluginHookBeforeInstallEvent,
   PluginHookBeforeInstallResult,
+  PluginHookWhatsAppGroupParticipantsUpdateEvent,
 };
 
 export type HookRunnerLogger = {
@@ -993,6 +995,17 @@ export function createHookRunner(
   }
 
   /**
+   * Run whatsapp_group_participants_update hook.
+   * Runs in parallel (fire-and-forget).
+   */
+  async function runWhatsAppGroupParticipantsUpdate(
+    event: PluginHookWhatsAppGroupParticipantsUpdateEvent,
+    ctx: PluginHookAgentContext,
+  ): Promise<void> {
+    return runVoidHook("whatsapp_group_participants_update", event, ctx);
+  }
+
+  /**
    * Run before_dispatch hook.
    * Allows plugins to inspect or handle a message before model dispatch.
    * First handler returning { handled: true } wins.
@@ -1496,6 +1509,7 @@ export function createHookRunner(
     runInboundClaimForPlugin,
     runInboundClaimForPluginOutcome,
     runMessageReceived,
+    runWhatsAppGroupParticipantsUpdate,
     runBeforeDispatch,
     runReplyDispatch,
     runMessageSending,

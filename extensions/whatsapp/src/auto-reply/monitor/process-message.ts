@@ -32,8 +32,6 @@ import { whatsappInboundLog } from "../loggers.js";
 import type { WebInboundMsg } from "../types.js";
 import { elide } from "../util.js";
 import { maybeSendAckReaction } from "./ack-reaction.js";
-import { createTourbotCliBridge, maybeHandleGuideInterviewMessage } from "./guide-interview.js";
-import { buildGuideDeferralText, isGuidePresentInGroup } from "./guide-presence.js";
 import {
   resolveVisibleWhatsAppGroupHistory,
   resolveVisibleWhatsAppReplyContext,
@@ -71,10 +69,6 @@ const WHATSAPP_MESSAGE_RECEIVED_HOOK_LIMITS = {
   maxQueue: 128,
   timeoutMs: 2_000,
 };
-
-// Bridge to the server/ tourbot CLI, reused across turns. Building it is
-// cheap (no IO happens until keep()/topicsKnown() is called).
-const tourbotCliBridge = createTourbotCliBridge();
 
 type WhatsAppMessageReceivedHookConfig = {
   pluginHooks?: {
@@ -219,56 +213,6 @@ export async function processMessage(params: {
     selfE164: self.e164 ?? null,
   });
   const account = inboundPolicy.account;
-
-  // Both guide-turn short-circuits below return before the normal ack-reaction
-  // call further down this function ever runs — that call only fires for
-  // turns that reach the full agent pipeline. Without this, the guide
-  // interview and every guide-present group turn silently never got the
-  // 👀 ack reaction, even though the message was genuinely handled.
-  const sendEarlyAckReaction = () =>
-    maybeSendAckReaction({
-      cfg: params.cfg,
-      msg: params.msg,
-      agentId: params.route.agentId,
-      sessionKey: params.route.sessionKey,
-      conversationId,
-      verbose: params.verbose,
-      accountId: account.accountId,
-      info: params.replyLogger.info.bind(params.replyLogger),
-      warn: params.replyLogger.warn.bind(params.replyLogger),
-    });
-
-  // Private DM fact-learning ("grill me" mode): when the human guide messages
-  // the bot 1:1, this fully owns the turn (asks questions, persists answers
-  // via the tourbot CLI bridge) and the normal agent pipeline never runs.
-  // See guide-interview.ts.
-  if (params.msg.chatType !== "group") {
-    const handledByInterview = await maybeHandleGuideInterviewMessage({
-      msg: params.msg,
-      cliBridge: tourbotCliBridge,
-    });
-    if (handledByInterview) {
-      if (!params.ackReaction && params.ackAlreadySent !== true) await sendEarlyAckReaction();
-      return true;
-    }
-  }
-
-  // Group defer-to-guide: when the human guide is present in this group, the
-  // bot should not try to answer client questions autonomously here — defer
-  // to the guide with an @-mention instead of generating its own answer.
-  // See guide-presence.ts.
-  if (params.msg.chatType === "group") {
-    const guidePresent = isGuidePresentInGroup({
-      groupParticipants: params.msg.groupParticipants,
-      roster: params.groupMemberNames.get(params.groupHistoryKey),
-      authDir: account.authDir,
-    });
-    if (guidePresent) {
-      if (!params.ackReaction && params.ackAlreadySent !== true) await sendEarlyAckReaction();
-      await params.msg.reply(buildGuideDeferralText());
-      return true;
-    }
-  }
 
   const contextVisibilityMode = resolveChannelContextVisibilityMode({
     cfg: params.cfg,

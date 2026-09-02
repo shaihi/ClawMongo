@@ -22,11 +22,19 @@ vi.mock("../../accounts.js", () => ({
   }),
 }));
 
-vi.mock("../../identity.js", () => ({
-  getPrimaryIdentityId: () => undefined,
-  getSelfIdentity: () => ({ e164: "+15550000001" }),
-  getSenderIdentity: () => ({ e164: "+15550000002", name: "Alice" }),
-}));
+// Spread the real module: process-message.ts now reaches identity.js for the
+// `@lid`-safe comparisons in roles.ts (resolveRole), so a mock that exports
+// only these three helpers leaves identitiesOverlap/resolveComparableIdentity
+// undefined and every turn throws. Mirrors process-message.test.ts.
+vi.mock("../../identity.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../identity.js")>();
+  return {
+    ...actual,
+    getPrimaryIdentityId: () => undefined,
+    getSelfIdentity: () => ({ e164: "+15550000001" }),
+    getSenderIdentity: () => ({ e164: "+15550000002", name: "Alice" }),
+  };
+});
 
 vi.mock("../../reconnect.js", () => ({
   newConnectionId: () => "test-conn-id",
@@ -227,6 +235,15 @@ function expectContextFields(context: Record<string, unknown>, fields: Record<st
 
 describe("processMessage audio preflight transcription", () => {
   beforeEach(() => {
+    // These are DM turns. processMessage now restricts private conversations
+    // to the admin and the guide (requirement 3) and silently drops anyone
+    // else, so this suite's fixture sender must BE one of those two or every
+    // turn returns before the audio-preflight logic under test ever runs.
+    // Pointing TOURBOT_GUIDE_E164 at the existing fixture number keeps the
+    // fixtures untouched and keeps the lockdown itself fully enforced —
+    // process-message.test.ts owns the tests that verify the lockdown.
+    vi.stubEnv("TOURBOT_GUIDE_E164", "+15550000002");
+
     transcribeFirstAudioMock.mockReset();
     maybeSendAckReactionMock.mockReset();
     maybeSendAckReactionMock.mockResolvedValue(null);
