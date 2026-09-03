@@ -191,6 +191,10 @@ export type HookRunnerOptions = {
 
 const DEFAULT_VOID_HOOK_TIMEOUT_MS_BY_HOOK: Partial<Record<PluginHookName, number>> = {
   agent_end: 30_000,
+  // Mirrors agent_end: the only other void/observation hook with an explicit
+  // default budget here, and the closest analog for a fire-and-forget
+  // channel lifecycle observation hook.
+  whatsapp_group_participants_update: 30_000,
 };
 const DEFAULT_MODIFYING_HOOK_TIMEOUT_MS_BY_HOOK: Partial<Record<PluginHookName, number>> = {
   before_agent_run: 15_000,

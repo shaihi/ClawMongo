@@ -212,15 +212,6 @@ type MonitorWebInboxOptions = {
   disconnectRetryAbortSignal?: AbortSignal;
   /** Shared group metadata cache used only for inbound metadata fallback after fetch failures. */
   groupMetadataCache?: WhatsAppGroupMetadataCache;
-  /**
-   * TourBot §7 fix: the group welcome should fire the moment the bot is
-   * ADDED to a group, not wait for the first message in it. Fired only for
-   * `action: "add"` events where the bot's own identity (via the @lid-safe
-   * `identitiesOverlap`, never a raw JID compare) is among the added
-   * participants. Never throws from here — errors are caught and logged;
-   * see the caller (auto-reply/monitor.ts) for what it does with this hook.
-   */
-  onGroupParticipantsUpdate?: (input: { groupId: string }) => Promise<void>;
 };
 
 export async function attachWebInboxToSocket(
@@ -921,12 +912,6 @@ export async function attachWebInboxToSocket(
       if (!groupId) {
         return;
       }
-      void options.onGroupParticipantsUpdate?.({ groupId }).catch((err) => {
-        inboundLogger.warn(
-          { error: String(err), groupId },
-          "group-participants.update: bot-added welcome hook failed",
-        );
-      });
       const hookRunner = getGlobalHookRunner();
       if (hookRunner?.hasHooks("whatsapp_group_participants_update")) {
         const addedParticipants = (update.participants ?? [])

@@ -131,6 +131,7 @@ observation-only.
 - `message_sent` - observe outbound delivery success or failure
 - **`before_dispatch`** - inspect or rewrite an outbound dispatch before channel handoff
 - **`reply_dispatch`** - participate in the final reply-dispatch pipeline
+- `whatsapp_group_participants_update` - observe the WhatsApp gateway's own account being added to a group
 
 **Sessions and compaction**
 
@@ -379,6 +380,14 @@ Decision rules:
   delivery keeps returning an empty result array for compatibility.
 - `message_sent` is observation-only. Handler failures are logged and do not
   change the delivery result.
+
+`whatsapp_group_participants_update` fires only when the WhatsApp gateway's
+own account is among the participants added to a group (never for other
+participants being added, removed, or promoted/demoted). The event carries
+`groupId`, an optional `addedParticipants` array of the JIDs added in that
+update, and `channelId: "whatsapp"`; `ctx` carries `channelId: "whatsapp"`.
+It is void/fire-and-forget: return values are ignored, and handler errors are
+logged and never thrown into the inbound WhatsApp path.
 
 ## Install hooks
 

@@ -322,7 +322,7 @@ export async function monitorWebChannel(
               account,
             });
 
-            const listener = (await (listenerFactory ?? attachWebInboxToSocket)({
+            return (await (listenerFactory ?? attachWebInboxToSocket)({
               cfg,
               loadConfig: loadCurrentMonitorConfig,
               verbose,
@@ -346,8 +346,6 @@ export async function monitorWebChannel(
               },
               sock,
             })) as ManagedWhatsAppListener;
-
-            return listener;
           },
           onHeartbeat: (snapshot) => {
             const authAgeMs = getWebAuthAgeMs(account.authDir);
