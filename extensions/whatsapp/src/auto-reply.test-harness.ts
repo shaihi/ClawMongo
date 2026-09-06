@@ -229,12 +229,14 @@ export function createWebListenerFactoryCapture(): AnyExport {
         onMessage: (msg: WebInboundMessage) => Promise<void>;
         debounceMs?: number;
         selfChatMode?: boolean;
+        appendReplyWindow?: { afterMs: number; untilMs: number; maxAgeMs: number };
       }
     | undefined;
   const listenerFactory = async (opts: {
     onMessage: (msg: WebInboundMessage) => Promise<void>;
     debounceMs?: number;
     selfChatMode?: boolean;
+    appendReplyWindow?: { afterMs: number; untilMs: number; maxAgeMs: number };
   }) => {
     capturedOnMessage = opts.onMessage;
     capturedOptions = opts;

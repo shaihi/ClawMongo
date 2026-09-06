@@ -180,6 +180,12 @@ function isNonEmptyString(value: string | undefined): value is string {
   return Boolean(value);
 }
 
+type AppendReplyWindow = {
+  afterMs: number;
+  untilMs: number;
+  maxAgeMs: number;
+};
+
 type MonitorWebInboxOptions = {
   cfg: OpenClawConfig;
   loadConfig?: () => OpenClawConfig;
@@ -212,6 +218,8 @@ type MonitorWebInboxOptions = {
   disconnectRetryAbortSignal?: AbortSignal;
   /** Shared group metadata cache used only for inbound metadata fallback after fetch failures. */
   groupMetadataCache?: WhatsAppGroupMetadataCache;
+  /** Bounded reconnect window for offline append auto-replies. */
+  appendReplyWindow?: AppendReplyWindow;
 };
 
 export async function attachWebInboxToSocket(
@@ -869,7 +877,17 @@ export async function attachWebInboxToSocket(
         const msgTsRaw = msg.messageTimestamp;
         const msgTsNum = msgTsRaw != null ? Number(msgTsRaw) : Number.NaN;
         const msgTsMs = Number.isFinite(msgTsNum) ? msgTsNum * 1000 : 0;
-        if (msgTsMs < connectedAtMs - APPEND_RECENT_GRACE_MS) {
+        // Reconnect catch-up is temporary; after it expires, preserve steady-state
+        // handling for fresh appends instead of rejecting every later append.
+        const nowMs = Date.now();
+        const appendAfterMs =
+          options.appendReplyWindow && nowMs <= options.appendReplyWindow.untilMs
+            ? Math.max(
+                options.appendReplyWindow.afterMs,
+                nowMs - options.appendReplyWindow.maxAgeMs,
+              )
+            : connectedAtMs - APPEND_RECENT_GRACE_MS;
+        if (msgTsMs < appendAfterMs) {
           continue;
         }
       }

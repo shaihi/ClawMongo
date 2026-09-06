@@ -22,6 +22,7 @@ import {
   WHATSAPP_WATCHDOG_TIMEOUT_ERROR,
   type ManagedWhatsAppListener,
 } from "../connection-controller.js";
+import { WHATSAPP_INBOUND_DEDUPE_TTL_MS } from "../inbound/dedupe.js";
 import { attachWebInboxToSocket, type WhatsAppGroupMetadataCache } from "../inbound/monitor.js";
 import {
   newConnectionId,
@@ -254,6 +255,10 @@ export async function monitorWebChannel(
 
   const transportTimeoutMs = tuning.transportTimeoutMs ?? DEFAULT_TRANSPORT_TIMEOUT_MS;
   const messageTimeoutMs = tuning.messageTimeoutMs ?? 30 * 60 * 1000;
+  const reconnectCatchUpWindowMs = Math.min(
+    Math.max(messageTimeoutMs, 60_000),
+    WHATSAPP_INBOUND_DEDUPE_TTL_MS,
+  );
   const watchdogCheckMs = tuning.watchdogCheckMs ?? 60 * 1000;
   const controller = new WhatsAppConnectionController({
     accountId: account.accountId,
@@ -338,6 +343,13 @@ export async function monitorWebChannel(
               disconnectRetryPolicy: reconnectPolicy,
               disconnectRetryAbortSignal: controller.getDisconnectRetryAbortSignal(),
               groupMetadataCache,
+              appendReplyWindow: connection.openedAfterRecentInbound
+                ? {
+                    afterMs: connection.startedAt - reconnectCatchUpWindowMs,
+                    untilMs: connection.startedAt + reconnectCatchUpWindowMs,
+                    maxAgeMs: reconnectCatchUpWindowMs,
+                  }
+                : undefined,
               onMessage: async (msg: WebInboundMsg) => {
                 const inboundAt = Date.now();
                 controller.noteInbound(inboundAt);
