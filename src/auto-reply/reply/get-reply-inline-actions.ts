@@ -102,7 +102,7 @@ function resolveSlashCommandName(commandBodyNormalized: string): string | null {
 function expandBundleCommandPromptTemplate(template: string, args?: string): string {
   const normalizedArgs = normalizeOptionalString(args) || "";
   const rendered = template.includes("$ARGUMENTS")
-    ? template.replaceAll("$ARGUMENTS", normalizedArgs)
+    ? template.replaceAll("$ARGUMENTS", () => normalizedArgs)
     : template;
   if (!normalizedArgs || template.includes("$ARGUMENTS")) {
     return rendered.trim();
