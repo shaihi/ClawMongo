@@ -92,5 +92,4 @@ peerDependencyRules:
     "prism-media>opusscript": "^0.0.8 || ^0.1.1"
 
 patchedDependencies:
-  "baileys@7.0.0-rc10": "patches/baileys@7.0.0-rc10.patch"
   "@agentclientprotocol/claude-agent-acp@0.33.1": "patches/@agentclientprotocol__claude-agent-acp@0.33.1.patch"
